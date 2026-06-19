@@ -1,0 +1,45 @@
+name: Convert Office to PDF
+
+on:
+  push:
+    paths:
+      - 'preview/**'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  convert:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install LibreOffice
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libreoffice fonts-noto-cjk
+
+      - name: Convert Office to PDF
+        run: |
+          mkdir -p converted
+          shopt -s nullglob
+          for f in preview/*.docx preview/*.doc preview/*.xlsx preview/*.xls preview/*.pptx preview/*.ppt; do
+            [ -e "$f" ] || continue
+            echo "Converting: $f"
+            libreoffice --headless --convert-to pdf --outdir converted "$f"
+          done
+          ls -la converted/ || echo "no files"
+
+      - name: Commit converted PDFs
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add converted/ 2>/dev/null || true
+          if git diff --staged --quiet; then
+            echo "No changes"
+          else
+            git commit -m "Auto-convert Office to PDF"
+            git push
+          fi
