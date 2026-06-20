@@ -21,6 +21,29 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libreoffice fonts-noto-cjk
 
+      - name: Install BIZ UD fonts
+        run: |
+          mkdir -p ~/.fonts
+          BASE="https://github.com/googlefonts/morisawa-biz-ud-gothic/raw/main/fonts/ttf"
+          for f in BIZUDGothic-Regular.ttf BIZUDGothic-Bold.ttf BIZUDPGothic-Regular.ttf BIZUDPGothic-Bold.ttf; do
+            curl -sL "$BASE/$f" -o ~/.fonts/$f || echo "failed: $f"
+          done
+          fc-cache -f ~/.fonts
+          fc-list | grep -i "BIZ" || echo "BIZ fonts not found"
+
+      - name: Set up font substitution
+        run: |
+          mkdir -p ~/.config/libreoffice/4/user
+          cat > ~/.config/libreoffice/4/user/registrymodifications.xcu << 'XCU'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <oor:items xmlns:oor="http://openoffice.org/2001/registry" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+           <item oor:path="/org.openoffice.VCL/FontSubstitutions/Replacement"><node oor:name="UD デジタル 教科書体 NK-R" oor:op="replace"><prop oor:name="SubstFonts"><value>BIZ UDPGothic</value></prop><prop oor:name="SubstFontsMS"><value>BIZ UDPGothic</value></prop><prop oor:name="Always"><value>true</value></prop><prop oor:name="ScreenOnly"><value>false</value></prop></node></item>
+           <item oor:path="/org.openoffice.VCL/FontSubstitutions/Replacement"><node oor:name="UD デジタル 教科書体 NK-B" oor:op="replace"><prop oor:name="SubstFonts"><value>BIZ UDPGothic</value></prop><prop oor:name="SubstFontsMS"><value>BIZ UDPGothic</value></prop><prop oor:name="Always"><value>true</value></prop><prop oor:name="ScreenOnly"><value>false</value></prop></node></item>
+           <item oor:path="/org.openoffice.VCL/FontSubstitutions/Replacement"><node oor:name="UD デジタル 教科書体 NP-B" oor:op="replace"><prop oor:name="SubstFonts"><value>BIZ UDPGothic</value></prop><prop oor:name="SubstFontsMS"><value>BIZ UDPGothic</value></prop><prop oor:name="Always"><value>true</value></prop><prop oor:name="ScreenOnly"><value>false</value></prop></node></item>
+          </oor:items>
+          XCU
+          sed -i 's/^          //' ~/.config/libreoffice/4/user/registrymodifications.xcu
+
       - name: Convert Office to PDF
         run: |
           mkdir -p converted
