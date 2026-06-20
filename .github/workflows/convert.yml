@@ -9,6 +9,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: convert-pdf
+  cancel-in-progress: false
+
 jobs:
   convert:
     runs-on: ubuntu-latest
@@ -16,7 +20,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install LibreOffice
+      - name: Install LibreOffice and fonts
         run: |
           sudo apt-get update
           sudo apt-get install -y libreoffice fonts-noto-cjk
@@ -25,24 +29,33 @@ jobs:
         run: |
           mkdir -p ~/.fonts
           BASE="https://github.com/googlefonts/morisawa-biz-ud-gothic/raw/main/fonts/ttf"
-          for f in BIZUDGothic-Regular.ttf BIZUDGothic-Bold.ttf BIZUDPGothic-Regular.ttf BIZUDPGothic-Bold.ttf; do
-            curl -sL "$BASE/$f" -o ~/.fonts/$f || echo "failed: $f"
-          done
+          curl -sL "$BASE/BIZUDGothic-Regular.ttf"  -o ~/.fonts/BIZUDGothic-Regular.ttf  || true
+          curl -sL "$BASE/BIZUDGothic-Bold.ttf"     -o ~/.fonts/BIZUDGothic-Bold.ttf     || true
+          curl -sL "$BASE/BIZUDPGothic-Regular.ttf" -o ~/.fonts/BIZUDPGothic-Regular.ttf || true
+          curl -sL "$BASE/BIZUDPGothic-Bold.ttf"    -o ~/.fonts/BIZUDPGothic-Bold.ttf    || true
           fc-cache -f ~/.fonts
-          fc-list | grep -i "BIZ" || echo "BIZ fonts not found"
+          fc-list | grep -i BIZ || echo "warning: BIZ fonts not detected"
 
       - name: Set up font substitution
         run: |
           mkdir -p ~/.config/libreoffice/4/user
-          cat > ~/.config/libreoffice/4/user/registrymodifications.xcu << 'XCU'
-          <?xml version="1.0" encoding="UTF-8"?>
-          <oor:items xmlns:oor="http://openoffice.org/2001/registry" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
-           <item oor:path="/org.openoffice.VCL/FontSubstitutions/Replacement"><node oor:name="UD デジタル 教科書体 NK-R" oor:op="replace"><prop oor:name="SubstFonts"><value>BIZ UDPGothic</value></prop><prop oor:name="SubstFontsMS"><value>BIZ UDPGothic</value></prop><prop oor:name="Always"><value>true</value></prop><prop oor:name="ScreenOnly"><value>false</value></prop></node></item>
-           <item oor:path="/org.openoffice.VCL/FontSubstitutions/Replacement"><node oor:name="UD デジタル 教科書体 NK-B" oor:op="replace"><prop oor:name="SubstFonts"><value>BIZ UDPGothic</value></prop><prop oor:name="SubstFontsMS"><value>BIZ UDPGothic</value></prop><prop oor:name="Always"><value>true</value></prop><prop oor:name="ScreenOnly"><value>false</value></prop></node></item>
-           <item oor:path="/org.openoffice.VCL/FontSubstitutions/Replacement"><node oor:name="UD デジタル 教科書体 NP-B" oor:op="replace"><prop oor:name="SubstFonts"><value>BIZ UDPGothic</value></prop><prop oor:name="SubstFontsMS"><value>BIZ UDPGothic</value></prop><prop oor:name="Always"><value>true</value></prop><prop oor:name="ScreenOnly"><value>false</value></prop></node></item>
-          </oor:items>
-          XCU
-          sed -i 's/^          //' ~/.config/libreoffice/4/user/registrymodifications.xcu
+          python3 - << 'PYEOF'
+          import os
+          fonts = ["UD \u30c7\u30b8\u30bf\u30eb \u6559\u79d1\u66f8\u4f53 NK-R",
+                   "UD \u30c7\u30b8\u30bf\u30eb \u6559\u79d1\u66f8\u4f53 NK-B",
+                   "UD \u30c7\u30b8\u30bf\u30eb \u6559\u79d1\u66f8\u4f53 NP-B",
+                   "UD \u30c7\u30b8\u30bf\u30eb \u6559\u79d1\u66f8\u4f53 N-R",
+                   "UD \u30c7\u30b8\u30bf\u30eb \u6559\u79d1\u66f8\u4f53 N-B"]
+          lines = ['<?xml version="1.0" encoding="UTF-8"?>',
+                   '<oor:items xmlns:oor="http://openoffice.org/2001/registry" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">']
+          for fn in fonts:
+              lines.append('<item oor:path="/org.openoffice.VCL/FontSubstitutions/Replacement"><node oor:name="%s" oor:op="replace"><prop oor:name="SubstFonts"><value>BIZ UDPGothic</value></prop><prop oor:name="SubstFontsMS"><value>BIZ UDPGothic</value></prop><prop oor:name="Always"><value>true</value></prop><prop oor:name="ScreenOnly"><value>false</value></prop></node></item>' % fn)
+          lines.append('</oor:items>')
+          path = os.path.expanduser('~/.config/libreoffice/4/user/registrymodifications.xcu')
+          with open(path, 'w', encoding='utf-8') as f:
+              f.write('\n'.join(lines))
+          print('font substitution config written')
+          PYEOF
 
       - name: Convert Office to PDF
         run: |
@@ -51,8 +64,9 @@ jobs:
           for f in preview/*.docx preview/*.doc preview/*.xlsx preview/*.xls preview/*.pptx preview/*.ppt; do
             [ -e "$f" ] || continue
             echo "Converting: $f"
-            libreoffice --headless --convert-to pdf --outdir converted "$f"
+            libreoffice --headless --convert-to pdf --outdir converted "$f" || echo "convert error: $f"
           done
+          echo "--- converted files ---"
           ls -la converted/ || echo "no files"
 
       - name: Commit converted PDFs
@@ -61,8 +75,16 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add converted/ 2>/dev/null || true
           if git diff --staged --quiet; then
-            echo "No changes"
+            echo "No changes to commit"
           else
             git commit -m "Auto-convert Office to PDF"
-            git push
+            for i in 1 2 3 4 5; do
+              git pull --rebase --autostash origin main || true
+              if git push origin main; then
+                echo "push success"
+                break
+              fi
+              echo "push retry $i ..."
+              sleep 3
+            done
           fi
